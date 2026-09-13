@@ -2,6 +2,9 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.codex/venv/
+.codex/data/
+.codex/bootstrap.json
 build/
 dist/
 .coverage

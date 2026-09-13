@@ -1,12 +1,41 @@
 # Content Discovery and Capture
 
-Discover a collection, understand what is available, and choose what to capture. Keep original bytes, version history, reading copies and provenance distinct.
+A simple way to discover material in a folder or website and choose exactly what to keep.
 
-This is the local V1 implementation. It has exactly two source adapters: **Web** and **Filesystem**. Its application engine runs independently of an agent host. A conversational plugin provides the interaction layer; the host contributes its available browsing and reasoning capabilities.
+## Start with Codex
 
-## Using the application
+Give Codex this repository and say:
 
-After setup in a compatible local host, ordinary requests look like:
+> Set up Content Discovery and Capture.
+
+Codex reads the repository instructions and handles first-time setup in the background. It prepares the private workspace, connects the app to the session and checks that it is ready. You do not need to install Python, create a virtual environment, run terminal commands, configure MCP, or install dependencies.
+
+When setup is complete, Codex confirms:
+
+> Content Discovery and Capture is ready. What content would you like me to discover?
+
+## Your first discovery
+
+1. Tell Codex where the material is: a website or a folder.
+2. Codex shows what it found, what is reachable and what still needs access. You choose which sources and material to check.
+3. Review the proposed discovery or capture in the approval panel. Codex never approves it for you.
+4. Ask Codex to capture the selected material, make reading copies or prepare a Source Pack.
+
+You can say:
+
+> Check this course website for new lessons and attachments.
+
+> Index this folder, then show me what changed.
+
+> Capture the selected lessons and make reading copies, but skip video.
+
+The app keeps original files, versions, reading copies and provenance separate. Access problems and incomplete checks remain visible instead of being treated as deletion.
+
+This local V1 implementation has exactly two source adapters: **Web** and **Filesystem**. It does not perform open-web research, automatic scheduling or Academic Assignment Assistant integration.
+
+## What you can do
+
+Once Codex says it is ready, ordinary requests can be as simple as:
 
 > Index this folder without copying or changing anything.
 
@@ -18,7 +47,7 @@ After setup in a compatible local host, ordinary requests look like:
 
 > Create a compact Source Pack containing these captured versions.
 
-For refresh, the application first presents the source registry. Choose existing sources, add a bounded new location, disable a source, or cancel. It then shows the discovery budget in a local review panel. Capture has a separate review with explicit selections, derivations and budgets. The conversational agent cannot grant these approvals through its tool API.
+For refresh, Codex first shows the sources it knows about. You can choose existing sources, add a new location, disable a source or cancel. It then shows the discovery workload in a local review panel. Capture has a separate review with explicit selections, reading copies and budgets. You make these approvals in the panel.
 
 Index-only is a completed workflow. Access failures and incomplete scans never replace the last successful baseline. Capturing a new version never makes an earlier version or its derivatives stale or superseded. Removing a source from future checks retains the captured history.
 
@@ -36,7 +65,9 @@ Index-only is a completed workflow. Access failures and incomplete scans never r
 
 No cloud API source adapters, open-web research, automatic scheduler, or Academic Assignment Assistant integration are included. The External Discovery Provider is a protocol boundary only.
 
-## Setup for developers and host administrators
+## Advanced / Developer Setup
+
+The normal Codex journey above is the supported end-user setup. The details below are for maintainers and host administrators who need to work on the source tree directly.
 
 The engine requires Python 3.12 or newer. Use a local environment outside any source being captured. The current execution lock implementation targets macOS and Linux.
 
@@ -68,7 +99,7 @@ To launch an independent ephemeral browser through Playwright, use `--browser ch
 
 To enable transcription, provision a local CTranslate2 Whisper model and set `CDC_TRANSCRIPTION_MODEL` to its directory in the service environment. The application uses local-files-only loading and does not automatically download models. With no model, transcription is UNAVAILABLE and originals can still be captured. The tiny model used for a development smoke test is not a production quality recommendation.
 
-## Developer diagnostics
+### Developer diagnostics
 
 ```sh
 content-capture --project /path/to/project capabilities
@@ -78,7 +109,7 @@ content-capture --project /path/to/project call resume_status
 
 There is no CLI or model tool that accepts `approved: true`. For manual developer use, run `content-capture --project /path/to/project review` and open `/review/<review-id>` on the address it prints. The trusted panel is the approval authority. This is a workflow boundary, not an operating-system sandbox against a malicious process that already has the user's privileges.
 
-## Validation
+### Validation
 
 ```sh
 PYTHONPATH=src python3.12 -m unittest discover -s tests -v
@@ -88,7 +119,7 @@ Set `CDC_TEST_BROWSER=1` to enable the optional headless browser test in an envi
 
 See [validation results](docs/validation.md), [acceptance evidence](docs/acceptance-matrix.md), [architecture](docs/architecture.md) and [security boundaries](SECURITY.md). The release has explicit integration limits; these documents distinguish executed tests from unverified live-source scenarios.
 
-## Storage and portability
+### Storage and portability
 
 A private capture project holds SQLite metadata, immutable content objects, bounded staging files, versioned reports and optional exported ZIPs. Capture projects and secrets must not be committed to the application repository. Metadata schema version 1 is supported; unknown versions are rejected rather than rewritten.
 

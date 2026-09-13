@@ -1,0 +1,7 @@
+[mcp_servers.content_discovery_and_capture]
+command = "scripts/codex-mcp"
+cwd = "."
+startup_timeout_sec = 180
+tool_timeout_sec = 120
+required = true
+default_tools_approval_mode = "prompt"
