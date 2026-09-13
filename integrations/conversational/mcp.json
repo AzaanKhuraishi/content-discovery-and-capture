@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "content-discovery-and-capture": {
+      "type": "stdio",
+      "command": "content-capture",
+      "args": ["--project", "${PLUGIN_DATA}/collection", "serve"]
+    }
+  }
+}

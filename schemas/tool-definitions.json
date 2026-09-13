@@ -1,0 +1,470 @@
+[
+  {
+    "name": "configure_host_browser",
+    "description": "Advertise only browser capabilities actually provided by this host; no sessions are persisted.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "offered": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "offered"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "runtime_actions",
+    "description": "Read pending scoped browser actions for the host to execute with its own tools.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "submit_runtime_result",
+    "description": "Return bounded observations or staged capture results for a pending browser action. Does not grant approval.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "action_id",
+        "result"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "registry",
+    "description": "List registered sources before any refresh. Also offers adding a new location.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "classify",
+    "description": "Record evidence-based content-purpose labels without supersession or relevance judgments.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "resource_id": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "basis": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "resource_id",
+        "labels",
+        "basis",
+        "evidence"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "register_source",
+    "description": "Register an explicitly supplied source and scope; does not scan.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "object"
+        },
+        "access_requirement": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "location"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "update_source",
+    "description": "Rename, disable/remove or revise scope; captured history is retained.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "source_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "source_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "prepare_refresh",
+    "description": "Show source selection and discovery budgets for user review. No source I/O.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "source_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "budget": {
+          "type": "object"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "refresh",
+    "description": "Run bounded discovery only after user review; call again to continue a running refresh.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "review_id": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "review_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "resume_run",
+    "description": "Resume a checkpoint after the user restores access.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "prepare_discovery_resume",
+    "description": "Review a larger total discovery budget while retaining checkpoints.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "budget": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "run_id",
+        "budget"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "prepare_capture_resume",
+    "description": "Review renewed capture totals without resetting history or attempts.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string"
+        },
+        "max_bytes": {
+          "type": "integer"
+        },
+        "max_seconds": {
+          "type": "integer"
+        },
+        "max_attempts": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "job_id",
+        "max_bytes",
+        "max_seconds",
+        "max_attempts"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "close_run",
+    "description": "Close discovery as incomplete, preserving the previous successful baseline.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "index",
+    "description": "Show pre-capture inventory, coverage and feasibility. Index-only is complete.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "snapshot_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "prepare_capture",
+    "description": "Prepare selected representations and optional derivatives for user approval.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "snapshot_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "selection_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "derivatives": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_bytes": {
+          "type": "integer"
+        },
+        "max_seconds": {
+          "type": "integer"
+        },
+        "max_attempts": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "snapshot_ids",
+        "selection_ids"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "capture",
+    "description": "Capture only an approved plan, preserving versions and using bounded attempts.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "review_id": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "review_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cancel_job",
+    "description": "Cancel further processing and preserve existing outputs.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "resume_status",
+    "description": "Report saved work and whether to offer a source-selection refresh prompt.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "set_resume_prompt",
+    "description": "Enable or disable offering refresh on project resume; never scans automatically.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "report",
+    "description": "Read source-specific comparisons, captured versions and quality outcomes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "export_pack",
+    "description": "Build and verify a local Source Pack from explicitly selected captured artefacts.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "artefact_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "include_originals": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "prepare_compendium",
+    "description": "Review combining selected captured text versions into one reading copy.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "artefact_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "max_bytes": {
+          "type": "integer"
+        },
+        "max_seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artefact_ids",
+        "title"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "build_compendium",
+    "description": "Build an approved compendium while retaining all original inputs and lineage.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "review_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "review_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "recover",
+    "description": "Reconcile interrupted capture attempts; retain spent attempts and immutable history.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  }
+]

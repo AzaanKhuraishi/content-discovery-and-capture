@@ -1,0 +1,8 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "content-discovery-and-capture",
+  "version": "0.1.0",
+  "description": "Discover scoped Web and Filesystem sources, review changes, and selectively capture verified versions.",
+  "license": "MIT",
+  "keywords": ["discovery", "capture", "provenance", "refresh"]
+}
