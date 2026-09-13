@@ -1,4 +1,14 @@
-# Security and trust boundaries
+# Security Policy and Trust Boundaries
+
+Content Discovery and Capture is a public open-source repository. This policy describes how to report a vulnerability and the limits of the protections provided by the application. It does not claim that the application is secure against every threat.
+
+## Reporting a vulnerability
+
+Use GitHub's private vulnerability reporting form from the repository's **Security** tab and choose **Report a vulnerability**. Do not open a public issue for a suspected vulnerability. If private reporting is unavailable in your GitHub account, contact the maintainer privately through [Azaan Khuraishi's GitHub profile](https://github.com/AzaanKhuraishi) and request a private reporting channel.
+
+Include the affected commit or version, a concise description, reproduction steps that use synthetic data where possible, and the impact. Do not include passwords, tokens, cookies, signed URLs, private source material or other secrets in a report. If you accidentally disclose a secret, revoke it immediately and notify the maintainer through the same private channel.
+
+The maintainer aims to acknowledge reports within seven days, investigate privately, and coordinate a fix or mitigation before publishing details. Please allow reasonable time for triage and disclosure coordination.
 
 Source content is untrusted data. The engine does not execute commands found in source pages or documents. It accepts only typed operations and checks registered scopes and reviewed selections before source I/O. Macros and source scripts are not executed by the document converters. The optional browser necessarily executes page JavaScript within its browser runtime.
 
@@ -14,4 +24,6 @@ Conversion runs in a child process with a timeout and per-file output-size limit
 
 Browser providers can have limits they cannot enforce before transfer (for example buffered browser downloads and page runtime network traffic). These limitations must be disclosed by the provider; a job requiring strict transfer ceilings should use the bounded HTTP provider or a runtime with stronger controls. Browser security warnings, client blocks, CAPTCHAs and source access controls are not bypassed.
 
-Report a security concern privately to the repository maintainer once a repository is published. No repository or reporting endpoint has been created by this local build. Do not include credentials, original private content or signed URLs in public reports.
+The repository includes automated dependency review, dependency update proposals and code scanning. GitHub secret scanning and push protection are repository/account features whose availability is controlled by GitHub. These services can miss vulnerabilities and do not replace review of changes or safe handling of captured content.
+
+The application retains the following residual risks: a local process or agent with unrestricted access to the same OS account can modify files or operate the user's browser; opening a repository with automatic Codex setup enabled runs its checked-in bootstrap code; the HTTP provider is not a hardened multi-tenant SSRF proxy and does not provide DNS-pinning guarantees; filesystem checks do not defeat every adversarial concurrent namespace mutation; browser runtimes may access more network state than the provider can observe; and secret detection from arbitrary content is incomplete. Use trusted repositories, trusted sources and a network-restricted runtime for hostile workloads.
