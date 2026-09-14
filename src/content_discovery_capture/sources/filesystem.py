@@ -9,6 +9,60 @@ import heapq
 from ..domain import Scope, Budget, DiscoveryBatch, Observation, CaptureResult, CaptureError, AccessRequired, BudgetExceeded
 
 
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+
+
+def _descriptor_parent(path: Path):
+    """Open every parent component without following symlinks (POSIX)."""
+    if os.name == "nt" or not path.is_absolute() or os.open not in getattr(os, "supports_dir_fd", set()):
+        return None, None
+    # macOS exposes /var and /tmp as system symlinks. Resolve only the parents;
+    # the final component is still opened/stat'ed with O_NOFOLLOW/follow_symlinks=False.
+    if path == Path(os.sep):
+        resolved = path
+    else:
+        resolved = path.parent.resolve(strict=False) / path.name
+    parts = resolved.parts
+    fd = os.open(os.sep, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW)
+    if len(parts) == 1:
+        return fd, None
+    try:
+        for component in parts[1:-1]:
+            child = os.open(component, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        return fd, parts[-1]
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _safe_lstat(path: Path):
+    parent, name = _descriptor_parent(path)
+    if parent is None:
+        return path.lstat()
+    try:
+        if name is None:
+            return os.fstat(parent)
+        return os.stat(name, dir_fd=parent, follow_symlinks=False)
+    finally:
+        os.close(parent)
+
+
+def _open_nofollow(path: Path, flags: int):
+    parent, name = _descriptor_parent(path)
+    if parent is None:
+        return os.open(path, flags | _O_NOFOLLOW)
+    if name is None:
+        return parent
+    try:
+        fd = os.open(name, flags | _O_NOFOLLOW, dir_fd=parent)
+    finally:
+        os.close(parent)
+    return fd
+
+
 class FilesystemAdapter:
     kind = "filesystem"
 
@@ -24,7 +78,9 @@ class FilesystemAdapter:
         if not self.allowed(path, scope):
             return batch
         try:
-            info = path.lstat()
+            # Descriptor-relative lstat/open prevents a parent directory from being
+            # replaced with a symlink between scope validation and enumeration.
+            info = _safe_lstat(path)
             if stat.S_ISLNK(info.st_mode):
                 batch.gaps.append({"location": str(path), "reason": "Symlink not followed", "excluded": True})
                 return batch
@@ -45,8 +101,12 @@ class FilesystemAdapter:
                         if entry.name > after:
                             yield entry.name
                 limit = min(256, budget.max_items)
-                with os.scandir(path) as entries:
-                    names = heapq.nsmallest(limit + 1, candidates(entries))
+                dir_fd = _open_nofollow(path, os.O_RDONLY | _O_DIRECTORY)
+                try:
+                    with os.scandir(os.dup(dir_fd)) as entries:
+                        names = heapq.nsmallest(limit + 1, candidates(entries))
+                finally:
+                    os.close(dir_fd)
                 chunk = names[:limit]
                 batch.frontier = [{"location": str(path / name), "depth": cursor["depth"] + 1} for name in chunk]
                 if len(names) > limit:
@@ -54,6 +114,9 @@ class FilesystemAdapter:
                 return batch
             if not stat.S_ISREG(info.st_mode):
                 batch.gaps.append({"location": str(path), "reason": "Special file excluded", "excluded": True})
+                return batch
+            if info.st_nlink > 1:
+                batch.gaps.append({"location": str(path), "reason": "Hard-linked file excluded", "excluded": True})
                 return batch
             batch.observations.append(Observation(
                 identity=f"{info.st_dev}:{info.st_ino}", location=str(path), title=path.name,
@@ -78,12 +141,14 @@ class FilesystemAdapter:
         started = time.monotonic()
         total = 0
         try:
-            # O_NOFOLLOW prevents swapping the final file for a symlink at open time.
-            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            # Walk every component without following symlinks, including the final file.
+            fd = _open_nofollow(path, os.O_RDONLY)
             with os.fdopen(fd, "rb") as source, destination.open("xb") as target:
                 before = os.fstat(source.fileno())
                 if not stat.S_ISREG(before.st_mode):
                     raise CaptureError("Only regular files may be copied.")
+                if before.st_nlink > 1:
+                    raise CaptureError("Hard-linked files are excluded from capture.")
                 meta = observation["metadata"]
                 if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
                         meta["device"], meta["inode"], observation["size"], meta["mtime_ns"], meta["ctime_ns"]):

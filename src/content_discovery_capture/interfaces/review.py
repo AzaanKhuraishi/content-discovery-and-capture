@@ -102,6 +102,8 @@ class ReviewServer:
                     if discovery:
                         limits = payload["budget_per_source"]
                         summary = f"Per source: up to {limits['max_items']:,} items, {limits['max_bytes'] / 1024**2:.1f} MB inspected, {limits['max_seconds']} seconds and {limits['max_actions']} actions. No capture."
+                        if payload.get("warnings"):
+                            summary += " Warnings: " + " ".join(payload["warnings"])
                     else:
                         summary = f"Up to {payload['max_bytes'] / 1024**2:.1f} MB processed, {payload['max_seconds']} seconds, {payload['max_attempts']} attempts per item. Processing stays local."
                         summary += " Derivatives: " + (", ".join(payload["derivatives"]) or "none") + ". Previous versions remain preserved."

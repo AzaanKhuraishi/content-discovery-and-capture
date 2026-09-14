@@ -107,25 +107,42 @@ class WebAdapter:
         media = headers.get("content-type", cursor.get("media_type") or "application/octet-stream").split(";")[0]
         title = " ".join(page.title_parts).strip() or cursor.get("title") or Path(urlsplit(location).path).name or location
         native = cursor.get("native_id")
+        navigation = []
+        for link in page.links:
+            try:
+                safe = safe_url(link["url"])
+            except CaptureError:
+                batch_reason = {"location": safe_text(link.get("url", "")),
+                                "reason": "Invalid link omitted", "excluded": True}
+                # The gap is added after the batch is created below.
+                navigation.append({"url": "", "title": safe_text(link.get("title", "")),
+                                   "relation": link.get("relation", "links-to"), "invalid": True,
+                                   "gap": batch_reason})
+                continue
+            navigation.append({**link, "url": safe,
+                               "needs_resolution": link.get("needs_resolution", False) or link["url"] != safe})
         observation = Observation(identity=native or location, location=location, title=title,
             kind="page" if "html" in media else "file", media_type=media,
             size=int(headers["content-length"]) if headers.get("content-length", "").isdigit() else None,
             metadata={"etag": headers.get("etag"), "modified": headers.get("last-modified"),
                       "identity_basis": "native-id" if native else "stable-location",
                       "dynamic": page.dynamic, "discovery_method": response.method,
-                      "navigation": [{**link, "url": safe_url(link["url"]),
-                          "needs_resolution": link.get("needs_resolution", False) or link["url"] != safe_url(link["url"])} for link in page.links],
+                      "navigation": [link for link in navigation if not link.get("invalid")],
                       "navigation_reused": headers.get("x-cdc-reused") == "true"},
             parent=cursor.get("parent"), relation=cursor.get("relation", "contains"),
             needs_resolution=cursor.get("needs_resolution", False))
         batch = DiscoveryBatch([observation], bytes_read=len(response.body), actions=response.actions)
+        batch.gaps.extend(link["gap"] for link in navigation if link.get("invalid"))
         if not response.complete:
             batch.gaps.append({"location": location, "reason": "Inspection limit or unexplored dynamic structures"})
         if page.dynamic and not self.browser:
             batch.gaps.append({"location": location, "reason": "Dynamic content requires a browser capability"})
         for link in page.links:
             raw = link["url"]
-            safe = safe_url(raw)
+            try:
+                safe = safe_url(raw)
+            except CaptureError:
+                continue
             if not link.get("needs_resolution"):
                 self.ephemeral[(safe, location)] = raw
             child_asset = link["relation"] in ("embeds", "background", "alternative", "frame")
@@ -165,7 +182,13 @@ class WebAdapter:
                 self.http.previous = previous
         parser = PageParser(response.url)
         parser.feed(response.body.decode("utf-8", errors="replace"))
-        matches = [link["url"] for link in parser.links if safe_url(link["url"]) == location]
+        matches = []
+        for link in parser.links:
+            try:
+                if safe_url(link["url"]) == location:
+                    matches.append(link["url"])
+            except CaptureError:
+                continue
         if len(set(matches)) != 1:
             raise AccessRequired("Protected representation needs unambiguous resolution through its source.")
         self.ephemeral[key] = matches[0]

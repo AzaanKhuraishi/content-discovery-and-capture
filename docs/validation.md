@@ -1,32 +1,27 @@
 # Validation record
 
-Validation was run on 13 September 2026 on macOS arm64 with Python 3.12.14. The test environment used the optional document, browser and transcription dependencies, a Playwright Chromium headless shell installed under `work/browsers`, and an explicitly provisioned local Faster-Whisper tiny model under `work/models/tiny`. No private course corpus, Blackboard account, browser profile, cookie, signed URL or long recording was used.
+Validation was run on 14 September 2026 on macOS arm64 with Python 3.12. The deterministic test environment used the optional document dependencies. No private course corpus, Blackboard account, browser profile, cookie, signed URL or long recording was used.
 
 ## Executed checks
 
-The complete suite passed with browser and transcription checks enabled:
+The complete deterministic suite, including the adversarial security regression suite, passed:
 
 ```text
-Ran 42 tests in 13.558s
-OK
+Ran 52 tests
+OK (skipped=4)
 ```
 
 The command was:
 
 ```sh
-CDC_TEST_BROWSER=1 \
-CDC_TEST_AUDIO=/absolute/path/to/jfk.flac \
-CDC_TRANSCRIPTION_MODEL=/absolute/path/to/local/model \
-CDC_TEST_EXPECT_TEXT='ask not what your country can do for you' \
-PLAYWRIGHT_BROWSERS_PATH=/absolute/path/to/work/browsers \
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-The 42 tests cover registry and source-selection gates, explicit scope, Web and Filesystem discovery, nested/lazy browser discovery, dynamic and authenticated-runtime handoff, immutable snapshots and baselines, conservative change comparison, cross-source content deduplication, placement provenance, capture approval, finite retries, checkpoint/resume, crash reconciliation, document reading copies, PDF/DOCX/PPTX/ODT conversion, local transcription lineage, compendia, Source Pack checksums, schema validation, and stdio tool compatibility.
+The 52 tests cover registry and source-selection gates, explicit scope, Web and Filesystem discovery, immutable snapshots and baselines, conservative change comparison, cross-source content deduplication, placement provenance, capture approval, finite retries, checkpoint/resume, crash reconciliation, document reading copies, DOCX/PPTX/ODT conversion, compendia, Source Pack checksums, schema validation, stdio tool compatibility, and adversarial URL, secret, Markdown, hardlink, permissions, malformed-link, output-manifest and archive cases.
 
-The real Playwright test launched Chromium successfully after the session was switched to full access and passed its nested/lazy fixture. Before that change, the same browser process failed at macOS startup with `bootstrap_check_in ... MachPortRendezvousServer ... Permission denied (1100)`; this was a host sandbox restriction rather than an application failure.
+The optional Playwright and Faster-Whisper tests were skipped in this run because they require a browser process and an explicitly provisioned local model. They remain manual/optional checks rather than normal CI requirements.
 
-The transcription smoke test passed against the public `openai/whisper` `tests/jfk.flac` fixture. It verified nonempty timed segments, source SHA-256 linkage, SRT and JSON output, and the expected phrase. The four-placement acceptance check verified that shared audio bytes can deduplicate while four placements retain separate version-bound transcript artefacts. It does not establish production accuracy for long recordings.
+No live authenticated source, browser session or transcription model was used. Those checks require user-approved scopes and host capabilities.
 
 The official plugin and MCP manifests were validated against the `agent-plugins.org` 1.0.0 schemas. The local contract schema and every generated tool input schema passed JSON Schema validation. `skill-creator` quick validation reported `Skill is valid!`.
 

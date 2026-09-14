@@ -89,6 +89,9 @@ def execute(app, review, steps):
             try:
                 if hasattr(app.browser, "bind_context"):
                     app.browser.bind_context(attempt["id"])
+                attempt_path = Path(attempt["path"])
+                if (attempt_path.is_symlink() or attempt_path.parent.resolve() != store.staging.resolve()):
+                    raise CaptureError("Capture staging path is outside the private project directory.")
                 result = adapter.capture(item, scope, method, Path(attempt["path"]), left_bytes, left_seconds)
                 bytes_used = result.path.stat().st_size
                 # A prior crash may have committed an artefact but not the job checkpoint.
@@ -149,15 +152,27 @@ def execute(app, review, steps):
             destination = store.staging / ("derived_" + digest([job_id, item["selection_id"], operation])[:32])
             start = time.monotonic()
             try:
+                if destination.is_symlink() or destination.parent.resolve() != store.staging.resolve():
+                    raise CaptureError("Derivation staging path is outside the private project directory.")
                 if (destination / "result.json").exists():
                     import json
                     result = json.loads((destination / "result.json").read_text())
                 else:
                     result = derive(store.object_path(original["sha256"]), original["media_type"], operation,
                                     destination, left_seconds, left_bytes, item["location"])
+                if not isinstance(result.get("files"), list) or len(result["files"]) > 32:
+                    raise CaptureError("Derivation returned an invalid output manifest.")
                 outputs = []
                 for output in result["files"]:
-                    artefact_id = "artefact_" + digest([job_id, item["selection_id"], operation, output["name"]])[:32]
+                    name = output.get("name") if isinstance(output, dict) else None
+                    if (not isinstance(name, str) or not name or "\x00" in name or name in (".", "..")
+                            or "/" in name or "\\" in name
+                            or Path(name).name != name):
+                        raise CaptureError("Derivation returned an invalid output filename.")
+                    path = destination / name
+                    if path.resolve(strict=False).parent != destination.resolve() or path.is_symlink():
+                        raise CaptureError("Derived output left its staging directory.")
+                    artefact_id = "artefact_" + digest([job_id, item["selection_id"], operation, name])[:32]
                     existing = store.get("artefact", artefact_id, optional=True)
                     if existing:
                         if store.hash_file(store.object_path(existing["sha256"])) != existing["sha256"]:
@@ -167,7 +182,6 @@ def execute(app, review, steps):
                             derivative["accounted_artefacts"].append(artefact_id)
                         outputs.append(artefact_id)
                         continue
-                    path = destination / output["name"]
                     if not path.exists() and output.get("sha256"):
                         orphan = store.object_path(output["sha256"])
                         if orphan.exists() and store.hash_file(orphan) == output["sha256"]:

@@ -40,6 +40,8 @@ Each discovery batch is checkpointed with its frontier and usage. A successful s
 
 Capture persists attempt intent before performing an operation. Objects are hashed and atomically promoted. Artefact, verification and provenance records commit transactionally. Recovery reconciles interrupted attempts with already-committed artefacts and preserves spent attempts. Partially transferred items are retried individually; resumable HTTP Range transfer is not implemented. Completed items and discovery work are reused.
 
+Filesystem discovery and capture use descriptor-relative component walks with no-follow flags on supported POSIX platforms. This keeps parent-directory replacement and nested symlink changes from redirecting an approved read; hard-linked regular files are excluded because inode identity alone cannot distinguish a source alias from a project-private file. Other platforms use the existing pathname checks. The local HTTP runtime resolves and validates each URL immediately before its pinned socket connection, follows only scope-checked redirects, and disables ambient proxy settings. Browser providers remain separate runtime boundaries with provider-specific network and buffering limitations.
+
 Budget renewal uses a new user review and preserves the same run/job identity and checkpoint. Local execution is serialized per project. Browser action requests have durable IDs, while authentication stays outside project state. Waiting for a host action resumes the same attempt.
 
 ## Reasoning and classification

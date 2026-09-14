@@ -1,13 +1,16 @@
 """Bounded HTTP transport; credentials and redirect URLs never enter persisted logs."""
 from __future__ import annotations
 import importlib.util
+import http.client
 import os
 from pathlib import Path
 import ipaddress
 import socket
 import time
+import re
 from urllib.parse import urlsplit
-from urllib.request import Request, HTTPRedirectHandler, build_opener
+from urllib.request import (Request, HTTPRedirectHandler, HTTPHandler, HTTPSHandler,
+                            ProxyHandler, build_opener)
 from urllib.error import HTTPError, URLError
 
 from .contract import WebResponse
@@ -20,6 +23,16 @@ class HttpFailure(CaptureError):
         super().__init__(f"Source returned HTTP {status}.")
 
 
+def _ambiguous_numeric_host(host: str) -> bool:
+    """Reject legacy integer/octal/hex IPv4 spellings with parser-dependent meaning."""
+    if not host or not re.fullmatch(r"[0-9a-fA-FxX.]+", host) or ":" in host:
+        return False
+    try:
+        return socket.inet_ntoa(socket.inet_aton(host)) != host
+    except OSError:
+        return False
+
+
 def capabilities(browser=None):
     return {"filesystem": True, "http": True, "browser": browser.capabilities() if browser else {},
             "converters": {name: importlib.util.find_spec(module) is not None for name, module in
@@ -28,17 +41,98 @@ def capabilities(browser=None):
             "model_levels": {}, "observed": "Actual imports and explicitly supplied runtime provider"}
 
 
-def check_url(url, scope, asset=False):
+def _resolve_addresses(url, scope, asset=False):
     if not scope.permits(url, "web", asset=asset):
         raise CaptureError("Web location is outside the approved boundary.")
-    p = urlsplit(url)
+    try:
+        p = urlsplit(url)
+        if _ambiguous_numeric_host(p.hostname or ""):
+            raise CaptureError("Ambiguous numeric host representations are not allowed.")
+        port = p.port if p.port is not None else (443 if p.scheme == "https" else 80)
+        addresses = socket.getaddrinfo(p.hostname, port, type=socket.SOCK_STREAM)
+    except CaptureError:
+        raise
+    except (OSError, TypeError, ValueError):
+        raise CaptureError("Host could not be resolved.") from None
+    if not addresses:
+        raise CaptureError("Host could not be resolved.")
     if not scope.allow_private_network:
         try:
-            addresses = socket.getaddrinfo(p.hostname, p.port or (443 if p.scheme == "https" else 80))
-        except OSError:
-            raise CaptureError("Host could not be resolved.") from None
-        if any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
+            private = any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses)
+        except ValueError:
+            private = True
+        if private:
             raise CaptureError("Private network access is not included in this source scope.")
+    return addresses
+
+
+def check_url(url, scope, asset=False):
+    """Validate scope and resolve once for the connection that will be made."""
+    return _resolve_addresses(url, scope, asset)
+
+
+def _connect_pinned(addresses, timeout, source_address=None):
+    last_error = None
+    for family, socktype, proto, _canonname, sockaddr in addresses:
+        sock = socket.socket(family, socktype, proto)
+        try:
+            if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                sock.settimeout(timeout)
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as error:
+            last_error = error
+            sock.close()
+    if last_error:
+        raise last_error
+    raise OSError("No usable address")
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, host, addresses, **kwargs):
+        self._pinned_addresses = addresses
+        super().__init__(host, **kwargs)
+
+    def connect(self):
+        self.sock = _connect_pinned(self._pinned_addresses, self.timeout, self.source_address)
+        if self._tunnel_host:
+            self._tunnel()
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host, addresses, **kwargs):
+        self._pinned_addresses = addresses
+        super().__init__(host, **kwargs)
+
+    def connect(self):
+        sock = _connect_pinned(self._pinned_addresses, self.timeout, self.source_address)
+        if self._tunnel_host:
+            self.sock = sock
+            self._tunnel()
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+class _PinnedHTTPHandler(HTTPHandler):
+    def __init__(self, scope, asset):
+        super().__init__()
+        self.scope, self.asset = scope, asset
+
+    def http_open(self, req):
+        addresses = check_url(req.full_url, self.scope, self.asset)
+        return self.do_open(lambda host, **kwargs: _PinnedHTTPConnection(host, addresses, **kwargs), req)
+
+
+class _PinnedHTTPSHandler(HTTPSHandler):
+    def __init__(self, scope, asset):
+        super().__init__()
+        self.scope, self.asset = scope, asset
+
+    def https_open(self, req):
+        addresses = check_url(req.full_url, self.scope, self.asset)
+        return self.do_open(lambda host, **kwargs: _PinnedHTTPSConnection(host, addresses, **kwargs), req,
+                            context=self._context)
 
 
 class ScopedRedirect(HTTPRedirectHandler):
@@ -55,7 +149,11 @@ class HttpProvider:
         check_url(url, scope, asset)
         req = Request(url, method=method, headers={"User-Agent": "ContentDiscoveryCapture/0.1", **(headers or {})})
         try:
-            return build_opener(ScopedRedirect(scope, asset)).open(req, timeout=timeout)
+            # Ignore ambient HTTP(S)_PROXY settings: a proxy can otherwise reach a
+            # private target after the local preflight has passed.
+            opener = build_opener(ProxyHandler({}), ScopedRedirect(scope, asset),
+                                  _PinnedHTTPHandler(scope, asset), _PinnedHTTPSHandler(scope, asset))
+            return opener.open(req, timeout=timeout)
         except HTTPError as error:
             if error.code in (401, 403):
                 raise AccessRequired("Authentication or additional source access is required.") from None
