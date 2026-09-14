@@ -30,13 +30,21 @@ def project_lock(root):
 class Store:
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
-        self.root.mkdir(parents=True, exist_ok=True)
+        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.root.chmod(0o700)
         self.objects = self.root / "objects"
         self.staging = self.root / "staging"
-        self.objects.mkdir(exist_ok=True)
-        self.staging.mkdir(exist_ok=True)
-        self.db = sqlite3.connect(self.root / "project.sqlite3", timeout=30)
-        self.db.execute("PRAGMA journal_mode=WAL")
+        self.objects.mkdir(exist_ok=True, mode=0o700)
+        self.staging.mkdir(exist_ok=True, mode=0o700)
+        self.objects.chmod(0o700)
+        self.staging.chmod(0o700)
+        db_path = self.root / "project.sqlite3"
+        db_path.touch(mode=0o600, exist_ok=True)
+        db_path.chmod(0o600)
+        self.db = sqlite3.connect(db_path, timeout=30)
+        # A private rollback journal avoids world-readable WAL/SHM sidecars on
+        # systems whose SQLite defaults inherit a permissive umask.
+        self.db.execute("PRAGMA journal_mode=DELETE")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript("""
@@ -61,6 +69,10 @@ class Store:
             raise CaptureError("This project requires a different application schema version.")
         self.db.execute("INSERT OR IGNORE INTO meta VALUES ('schema_version','1')")
         self.db.commit()
+        for sidecar in (self.root / "project.sqlite3-wal", self.root / "project.sqlite3-shm",
+                        self.root / "project.sqlite3-journal"):
+            if sidecar.exists():
+                sidecar.chmod(0o600)
 
     @contextmanager
     def transaction(self):
@@ -96,6 +108,14 @@ class Store:
         return self.staging / uid("transfer")
 
     def promote(self, path: Path, expected=None):
+        try:
+            if path.is_symlink():
+                raise CaptureError("Staged content cannot be a symbolic link.")
+            resolved = path.resolve(strict=False)
+            if resolved.parent != self.staging.resolve() and not resolved.is_relative_to(self.staging.resolve()):
+                raise CaptureError("Staged content is outside the private project directory.")
+        except (OSError, RuntimeError):
+            raise CaptureError("Staged content is unavailable.") from None
         hasher = sha256()
         size = 0
         with path.open("rb") as stream:

@@ -51,34 +51,76 @@ def digest(value: Any) -> str:
     return sha256(canonical(value).encode()).hexdigest()
 
 
-SECRET_KEY = re.compile(r"(?i)(token|password|secret|signature|credential|authorization|cookie|session|api.?key|^sig$|^key$|^auth$|^x-amz-|^x-goog-)")
+SECRET_KEY = re.compile(
+    r"(?i)(token|password|secret|signature|credential|authorization|cookie|session|"
+    r"api.?key|access.?token|client.?secret|private.?key|"
+    r"^sig$|^key$|^auth$|^x-amz-|^x-goog-)"
+)
+_PATH_SECRET = re.compile(
+    r"(?i)(token|secret|signature|credential|authorization|cookie|session|"
+    r"api.?key|access.?token|client.?secret|private.?key)"
+)
+
+
+def _redact_path(path: str) -> str:
+    """Redact opaque secret-like path components while retaining stable URLs."""
+    parts = path.split("/")
+    for index, component in enumerate(parts):
+        decoded = unquote(component)
+        # Keep ordinary named files (for example, ``secretary.pdf``) readable.
+        looks_like_filename = decoded.count(".") == 1 and not decoded.startswith(".")
+        has_secret_shape = bool(re.search(r"[-_.=]", decoded) or re.search(r"\d", decoded)
+                                or decoded.casefold() in {"token", "secret", "signature", "credential", "authorization", "cookie", "session"})
+        if len(decoded) >= 8 and _PATH_SECRET.search(decoded) and has_secret_shape and not looks_like_filename:
+            parts[index] = "%5BREDACTED%5D"
+    return "/".join(parts)
 
 
 def safe_url(url: str) -> str:
-    p = urlsplit(url)
+    if not isinstance(url, str) or any(ord(char) < 32 for char in url):
+        raise CaptureError("The source returned an invalid URL.")
+    try:
+        p = urlsplit(url)
+        port = p.port
+        query = parse_qsl(p.query, keep_blank_values=True)
+    except (TypeError, ValueError):
+        raise CaptureError("The source returned an invalid URL.")
     host = p.hostname or ""
     if ":" in host:
         host = "[" + host + "]"
-    if p.port:
-        host += ":" + str(p.port)
-    return urlunsplit((p.scheme.lower(), host.lower(), p.path or "/",
-                      urlencode([(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True)
-                                 if not SECRET_KEY.search(k)]), ""))
+    if port is not None:
+        host += ":" + str(port)
+    return urlunsplit((p.scheme.lower(), host.lower(), _redact_path(p.path or "/"),
+                      urlencode([(k, v) for k, v in query if not SECRET_KEY.search(k)]), ""))
 
 
 def stable_url(url: str) -> str:
-    p = urlsplit(url)
+    try:
+        p = urlsplit(url)
+        query = parse_qsl(p.query, keep_blank_values=True)
+    except (TypeError, ValueError):
+        raise CaptureError("Use an HTTP or HTTPS source location.")
     if p.scheme not in ("http", "https") or not p.hostname:
         raise CaptureError("Use an HTTP or HTTPS source location.")
-    if p.username or p.password or p.fragment or any(SECRET_KEY.search(k) for k, _ in parse_qsl(p.query)):
+    if p.username or p.password or p.fragment or any(SECRET_KEY.search(k) for k, _ in query):
         raise CaptureError("Register a stable location without credentials, fragments or signed access parameters.")
+    if _redact_path(p.path or "/") != (p.path or "/"):
+        raise CaptureError("Register a stable location without credentials or secret path components.")
     return safe_url(url)
 
 
 def safe_text(value: str) -> str:
-    value = re.sub(r'https?://[^\s<>"\']+', lambda m: safe_url(m[0]), value)
+    def scrub_url(match):
+        try:
+            return safe_url(match[0])
+        except CaptureError:
+            return "[URL REDACTED]"
+
+    value = re.sub(r'https?://[^\s<>"\']+', scrub_url, value)
     value = re.sub(r'(?i)\b(bearer)\s+[^\s,;]+', r'\1 [REDACTED]', value)
-    return re.sub(r'(?i)\b(password|token|secret|signature|cookie|authorization)\s*[:=]\s*[^\s,;]+',
+    return re.sub(r'(?i)\b(password|token|secret|signature|credential|cookie|session|'
+                  r'authorization|api.?key|access.?token|client.?secret|private.?key)'
+                  r'\s*[:=]\s*[^\s,;]+',
                   r'\1=[REDACTED]', value)
 
 
@@ -118,12 +160,22 @@ class Scope:
         return json.loads(canonical(asdict(self)))
 
     def permits(self, location: str, kind: str, asset: bool = False) -> bool:
+        if not isinstance(location, str):
+            return False
+        if any(ord(char) < 32 for char in location):
+            return False
         if any(fnmatch.fnmatch(location, pattern) for pattern in self.excludes):
             return False
         if kind == "filesystem":
-            path = Path(location).resolve()
-            return any(path == Path(root).resolve() or path.is_relative_to(Path(root).resolve()) for root in self.roots)
-        p = urlsplit(location)
+            try:
+                path = Path(location).resolve()
+                return any(path == Path(root).resolve() or path.is_relative_to(Path(root).resolve()) for root in self.roots)
+            except (OSError, RuntimeError, ValueError):
+                return False
+        try:
+            p = urlsplit(location)
+        except (TypeError, ValueError):
+            return False
         if p.scheme not in ("https", "http") or p.username or p.password:
             return False
         origin = f"{p.scheme}://{p.netloc}"

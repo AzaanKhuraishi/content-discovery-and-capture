@@ -1,6 +1,6 @@
 """Versioned manifests are produced even when the user does not request a ZIP."""
 import json
-from .domain import now, uid
+from .domain import CaptureError, now, uid
 from .packaging import organisation
 
 
@@ -17,9 +17,13 @@ def create_manifest(app):
     with store.transaction():
         store.put("manifest", record)
     root = store.root / "reports"
-    root.mkdir(exist_ok=True)
+    if root.is_symlink():
+        raise CaptureError("Report directory cannot be a symbolic link.")
+    root.mkdir(exist_ok=True, mode=0o700)
+    root.chmod(0o700)
     path = root / (record["id"] + ".json")
     path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+    path.chmod(0o600)
     lines = ["# Capture report", "", "Originals, versions and all derivatives remain preserved.", ""]
     for job in record["jobs"]:
         lines.append(f"- {job['id']}: {job['state']}")
@@ -27,5 +31,7 @@ def create_manifest(app):
     for a in artefacts:
         title = a["title"].replace("\n", " ").replace("[", "\\[").replace("]", "\\]")
         lines.append(f"- [{title}](../objects/{a['sha256']}) — {a['role']}; version {a['version_id']}")
-    (root / (record["id"] + ".md")).write_text("\n".join(lines) + "\n")
+    markdown = root / (record["id"] + ".md")
+    markdown.write_text("\n".join(lines) + "\n")
+    markdown.chmod(0o600)
     return record

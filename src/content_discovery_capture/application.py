@@ -140,8 +140,24 @@ class Application:
         sources = [{"source_id": s["id"], "name": s["name"], "location": s["location"],
                     "scope_id": s["scope_id"], "scope": self.store.get("scope", s["scope_id"])["definition"],
                     "last_success": s["last_success"]} for s in active if s["id"] in selected]
+        warnings = []
+        for item in sources:
+            if item["scope"].get("allow_private_network"):
+                warnings.append(f"{item['name']}: local/private network access is included in this scope.")
+            if item["scope"].get("roots"):
+                for root in item["scope"]["roots"]:
+                    if not root.startswith("/"):
+                        continue
+                    try:
+                        resolved = Path(root).resolve()
+                        if resolved == Path("/") or resolved == Path.home() or Path.home().is_relative_to(resolved):
+                            warnings.append(f"{item['name']}: this filesystem scope is broad and may include sensitive personal files.")
+                            break
+                    except (OSError, RuntimeError):
+                        continue
         return self._review("discovery", {"sources": sources, "budget_per_source": asdict(limits),
             "estimate": "Collection size is unknown until inspected. Discovery may read up to the displayed byte/action/time limits per source.",
+            "warnings": warnings,
             "choices": "Check selected sources, return to add a new location, or cancel. Capture is a separate decision."})
 
     def prepare_discovery_resume(self, run_id, budget):

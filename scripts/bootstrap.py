@@ -15,7 +15,7 @@ import tempfile
 
 
 MIN_PYTHON = (3, 12)
-BOOTSTRAP_VERSION = 1
+BOOTSTRAP_VERSION = 2
 ROOT = Path(__file__).resolve().parents[1]
 CODEX_DIR = ROOT / ".codex"
 VENV = CODEX_DIR / "venv"
@@ -74,7 +74,9 @@ def run(command: list[str], *, quiet: bool = False) -> None:
 
 def source_fingerprint() -> str:
     digest = hashlib.sha256()
-    for path in (ROOT / "pyproject.toml", Path(__file__)):
+    paths = [ROOT / "pyproject.toml", Path(__file__)]
+    paths.extend(sorted((ROOT / "src").rglob("*.py")))
+    for path in paths:
         digest.update(path.read_bytes())
     return digest.hexdigest()
 
@@ -90,7 +92,8 @@ def marker_matches() -> bool:
 
 
 def create_environment(interpreter: str, quiet: bool) -> Path:
-    CODEX_DIR.mkdir(exist_ok=True)
+    CODEX_DIR.mkdir(exist_ok=True, mode=0o700)
+    CODEX_DIR.chmod(0o700)
     if not VENV.exists():
         run([interpreter, "-m", "venv", str(VENV)], quiet=quiet)
     venv_python = VENV / "bin" / "python"
@@ -107,7 +110,8 @@ def install_application(venv_python: Path, quiet: bool) -> None:
 
 
 def verify_runtime(venv_python: Path, quiet: bool) -> None:
-    DATA.mkdir(parents=True, exist_ok=True)
+    DATA.mkdir(parents=True, exist_ok=True, mode=0o700)
+    DATA.chmod(0o700)
     run(
         [
             str(venv_python),
@@ -143,7 +147,8 @@ def verify_runtime(venv_python: Path, quiet: bool) -> None:
 
 
 def write_marker(venv_python: Path) -> None:
-    CODEX_DIR.mkdir(exist_ok=True)
+    CODEX_DIR.mkdir(exist_ok=True, mode=0o700)
+    CODEX_DIR.chmod(0o700)
     python_version = subprocess.check_output(
         [str(venv_python), "-c", "import sys; print('.'.join(map(str, sys.version_info[:3])))"],
         text=True,
@@ -164,6 +169,7 @@ def write_marker(venv_python: Path) -> None:
             )
             handle.write("\n")
         temporary.replace(MARKER)
+        MARKER.chmod(0o600)
     finally:
         if temporary and temporary.exists():
             temporary.unlink()

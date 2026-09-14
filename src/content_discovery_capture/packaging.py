@@ -54,7 +54,10 @@ def export_pack(app, artefact_ids=None, include_originals=True):
         raise CaptureError("No captured artefacts match this package selection.")
     export_id = uid("pack")
     target_root = store.root / "exports"
-    target_root.mkdir(exist_ok=True)
+    if target_root.is_symlink():
+        raise CaptureError("Export directory cannot be a symbolic link.")
+    target_root.mkdir(exist_ok=True, mode=0o700)
+    target_root.chmod(0o700)
     stage = Path(tempfile.mkdtemp(prefix="pack-", dir=store.staging))
     entries, stored = [], {}
     for artefact in selected:
@@ -130,6 +133,7 @@ def export_pack(app, artefact_ids=None, include_originals=True):
             if hashlib.sha256(archive.read(path.relative_to(stage).as_posix())).hexdigest() != store.hash_file(path):
                 raise CaptureError("Package member hash mismatch.")
     os.replace(partial, archive_path)
+    archive_path.chmod(0o600)
     with store.transaction():
         store.put("manifest", manifest)
         store.event("pack_created", {"id": export_id, "sha256": store.hash_file(archive_path), "members": len(members)})

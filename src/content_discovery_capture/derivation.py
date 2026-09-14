@@ -1,17 +1,19 @@
 """Isolated, bounded transformation worker. Never downloads transcription models."""
 from __future__ import annotations
 from html.parser import HTMLParser
+from html import escape
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
 
-from .domain import CaptureError, safe_text
+from .domain import CaptureError, safe_text, safe_url
 
 
 class MarkdownParser(HTMLParser):
@@ -36,10 +38,23 @@ class MarkdownParser(HTMLParser):
         if tag == "br":
             self.parts.append("\n")
         if tag == "a":
-            self.hrefs.append(safe_text(urljoin(self.base, attrs.get("href", ""))))
-            self.parts.append("[")
+            href = attrs.get("href", "")
+            try:
+                resolved = urljoin(self.base, href)
+                safe = safe_url(resolved) if urlsplit(resolved).scheme.lower() in ("http", "https") else None
+            except (CaptureError, ValueError):
+                safe = None
+            self.hrefs.append(safe)
+            self.parts.append("[" if safe else "")
         if tag == "img":
-            self.parts.append(f"![{attrs.get('alt', '')}]({safe_text(urljoin(self.base, attrs.get('src', '')))})")
+            src = attrs.get("src", "")
+            try:
+                resolved = urljoin(self.base, src)
+                safe = safe_url(resolved) if urlsplit(resolved).scheme.lower() in ("http", "https") else None
+            except (CaptureError, ValueError):
+                safe = None
+            if safe:
+                self.parts.append(f"![{escape(attrs.get('alt', ''), quote=False)}]({safe})")
 
     def handle_endtag(self, tag):
         if tag in ("script", "style", "template"):
@@ -48,13 +63,15 @@ class MarkdownParser(HTMLParser):
         if self.skip:
             return
         if tag == "a" and self.hrefs:
-            self.parts.append("](" + self.hrefs.pop() + ")")
+            href = self.hrefs.pop()
+            if href:
+                self.parts.append("](" + href + ")")
         if tag in ("p", "div", "section", "article", "tr") or tag.startswith("h") and len(tag) == 2:
             self.parts.append("\n\n")
 
     def handle_data(self, text):
         if not self.skip:
-            self.parts.append(text)
+            self.parts.append(escape(text, quote=False))
 
 
 def supported(media, operation):
@@ -70,10 +87,14 @@ def supported(media, operation):
 def derive(input_path, media, operation, destination, timeout, max_bytes, base=""):
     if not supported(media, operation):
         raise CaptureError("This derivation is unavailable for the representation or installed capabilities.")
-    destination.mkdir(exist_ok=True)
+    if destination.is_symlink():
+        raise CaptureError("Derivation staging cannot be a symbolic link.")
+    destination.mkdir(exist_ok=True, mode=0o700)
+    destination.chmod(0o700)
     request = destination / "request.json"
     request.write_text(json.dumps({"input": str(input_path), "media": media, "operation": operation,
                                    "destination": str(destination), "base": base, "max_output_bytes": max_bytes}))
+    request.chmod(0o600)
     try:
         result = subprocess.run([sys.executable, "-m", "content_discovery_capture.derivation", str(request)],
                                 timeout=timeout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -81,8 +102,30 @@ def derive(input_path, media, operation, destination, timeout, max_bytes, base="
         raise CaptureError("Derivation reached the approved time budget.") from None
     if result.returncode:
         raise CaptureError("Derivation failed; the original remains preserved.")
-    output = json.loads((destination / "result.json").read_text())
-    if sum((destination / f["name"]).stat().st_size for f in output["files"]) > max_bytes:
+    try:
+        output = json.loads((destination / "result.json").read_text())
+        files = output["files"]
+        if (not isinstance(files, list) or len(files) > 32
+                or any(not isinstance(item, dict) or not isinstance(item.get("name"), str)
+                       for item in files)):
+            raise ValueError
+        paths = []
+        for item in files:
+            name = item["name"]
+            path = Path(name)
+            if (not name or "\x00" in name or len(name) > 255 or path.name != name
+                    or name in (".", "..") or "/" in name or "\\" in name):
+                raise ValueError
+            candidate_path = destination / path
+            if candidate_path.is_symlink():
+                raise ValueError
+            candidate = candidate_path.resolve()
+            if candidate.parent != destination.resolve():
+                raise ValueError
+            paths.append(candidate)
+    except (OSError, ValueError, KeyError, TypeError):
+        raise CaptureError("Derivation returned an invalid output manifest.") from None
+    if sum(path.stat().st_size for path in paths) > max_bytes:
         raise CaptureError("Derived output exceeds the approved byte budget.")
     return output
 
@@ -125,6 +168,9 @@ def worker(request):
         parser = MarkdownParser(request["base"])
         parser.feed(src.read_text(errors="replace"))
         text = "".join(parser.parts)
+        # Source-authored Markdown must never create an executable link target.
+        text = re.sub(r"(?i)(\]\(\s*)(?:javascript|data|vbscript|file|blob):",
+                      r"\1about:blank#blocked:", text)
         limitations.append("Rendered layout, interactions and unselected assets may not be represented")
     elif "wordprocessingml" in media:
         from docx import Document
@@ -175,6 +221,8 @@ def worker(request):
         data = (out / file["name"]).read_bytes()
         file["sha256"], file["size"] = hashlib.sha256(data).hexdigest(), len(data)
     (out / "result.json").write_text(json.dumps({"files": files, "limitations": limitations, "operation": operation, "worker_version": "1"}))
+    for produced in [out / file["name"] for file in files] + [out / "result.json"]:
+        produced.chmod(0o600)
 
 
 if __name__ == "__main__":
